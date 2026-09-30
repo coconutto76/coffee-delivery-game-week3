@@ -1,0 +1,209 @@
+<!doctype html><html lang="ko"><head><title>커피 배달 게임 | 프롬프트 구조화 실습</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{margin:0;background:#efe5d2;font-family:"Noto Sans KR","Malgun Gothic",sans-serif;color:#f4ebd7;overflow:auto}main{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}canvas{width:100%;min-height:0;flex:1;object-fit:contain;display:block}nav{flex-shrink:0;display:flex;justify-content:center;gap:5px;flex-wrap:wrap;padding:9px}button{font:inherit;font-size:12px;border:1px solid #aabbb0;border-radius:3px;background:#f9f4e6;color:#365b50;padding:9px 11px;cursor:pointer;touch-action:none}p{font-size:11px;margin:0 8px 8px;color:#56624a}</style></head><body><main><canvas tabindex="0" aria-label="플레이할 게임"></canvas><nav><button id="start">시작 / 계속</button><button id="pause">잠깐 멈추기</button><button id="reset">처음으로</button><button id="action">콩 따기 / 전하기</button><button data-dir="0,-1" aria-label="위">↑</button><button data-dir="-1,0" aria-label="왼쪽">←</button><button data-dir="0,1" aria-label="아래">↓</button><button data-dir="1,0" aria-label="오른쪽">→</button></nav><p>시작을 누른 뒤 방향키 / WASD로 이동 · E / Space로 커피콩 따기·배달</p></main><script>/* Dal-dongne Coffee. Original geometry and software 3D renderer. No dependencies. */
+(function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.Daldongne=api})(typeof globalThis!=='undefined'?globalThis:this,function(){
+'use strict';
+const W=1200,H=800,R=5.5,TAU=Math.PI*2;
+const add=(a,b)=>a.map((v,i)=>v+b[i]),sub=(a,b)=>a.map((v,i)=>v-b[i]),mul=(a,k)=>a.map(v=>v*k),dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0),cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],len=a=>Math.hypot(...a),norm=a=>mul(a,1/(len(a)||1)),clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const at=(lon,lat)=>[Math.sin(lon)*Math.cos(lat),Math.sin(lat),Math.cos(lon)*Math.cos(lat)];
+const angle=(a,b)=>Math.acos(clamp(dot(a,b),-1,1));
+function frame(n){let e=cross([0,1,0],n);if(len(e)<.001)e=cross([0,0,1],n);e=norm(e);return {n,e,u:norm(cross(n,e))}}
+const SITES=[
+ {id:'cafe',lon:-.36,lat:.29,name:'달동네 커피',en:'Little Cafe',type:'cafe',color:'#eedcb1',roof:'#465652',w:1.52,d:1.1,h:.79,order:'커피 네 잔',neighbor:'바리스타 소담'},
+ {id:'books',lon:.39,lat:.30,name:'봄날책방',en:'Bookshop',type:'hanok',color:'#eee0ba',roof:'#536568',w:1.35,d:1,h:.78,order:'따뜻한 아메리카노',neighbor:'책방지기 보라'},
+ {id:'store',lon:-.86,lat:.82,name:'우리슈퍼',en:'Corner Store',type:'shop',color:'#ddd49e',roof:'#708982',w:1.3,d:.95,h:.76,order:'아이스 라테',neighbor:'슈퍼 사장 영수'},
+ {id:'laundry',lon:.93,lat:.90,name:'보송세탁소',en:'Laundry',type:'shop',color:'#dce3cb',roof:'#8b9ca4',w:1.3,d:.95,h:.82,order:'디카페인 라테',neighbor:'세탁소 사장 미나'},
+ {id:'pavilion',lon:1.73,lat:-.06,name:'달빛정자',en:'Hill Pavilion',type:'pavilion',color:'#c59870',roof:'#596660',w:1.3,d:1.05,h:.8,order:'따뜻한 보리 라테',neighbor:'산책 나온 순자'},
+ {id:'home4',lon:-.80,lat:-.40,name:'햇살공방',en:'Pottery',type:'hanok',color:'#e9d1b3',roof:'#7a7869',w:1.2,d:.90,h:.70},
+ {id:'home5',lon:.72,lat:-.36,name:'꽃담집',en:'Flower House',type:'hanok',color:'#e4d6b6',roof:'#6d8582',w:1.12,d:.86,h:.69},
+ {id:'home1',lon:-1.75,lat:.05,name:'담장집',en:'Garden House',type:'hanok',color:'#e5d4b7',roof:'#53615d',w:1.3,d:1,h:.75},
+ {id:'home2',lon:2.82,lat:.56,name:'작은집',en:'Small House',type:'hanok',color:'#dfcfaf',roof:'#555b62',w:1.25,d:.98,h:.74},
+ {id:'home3',lon:-2.65,lat:-.61,name:'언덕집',en:'Hill House',type:'hanok',color:'#ead9b6',roof:'#64746a',w:1.2,d:1,h:.75}
+].map(s=>({...s,n:at(s.lon,s.lat),door:at(s.lon,s.lat-.24)}));
+const ORDERS=SITES.slice(1,5),CAFE=SITES[0];
+// Climate-crisis mode: coffee comes from the farm, and every season brings its own hazard.
+const FARM={id:'farm',name:'커피농장',en:'Coffee Farm',n:at(.02,-.4),door:at(.02,-.4),reach:.27},LOCS=[...SITES,FARM];
+const SEASONS=[
+ {id:'spring',name:'봄',limit:70,hazard:'dust',label:'황사 경보',tip:'모래바람 속에선 걸음이 느려져요',zones:[[.22,-.15,.15],[-.25,.45,.2],[1.3,.2,.2]]},
+ {id:'summer',name:'여름',limit:65,hazard:'heat',label:'폭염 경보',tip:'뜨거운 곳에선 걸음이 느려져요',zones:[[.55,.35,.2],[-.45,.78,.2],[1.55,.2,.22]]},
+ {id:'autumn',name:'가을',limit:60,hazard:'dust',label:'황사 경보',tip:'모래바람이 다시 불어와요',zones:[[.12,.3,.18],[-.6,.35,.2],[1.1,.25,.2],[.5,-.55,.2]]},
+ {id:'winter',name:'겨울',limit:65,hazard:'cold',label:'한파 경보',tip:'한파 속에 들어가면 잠시 몸이 얼어요',zones:[[.2,-.15,.14],[-.35,.62,.18],[1.35,.3,.18],[.55,.9,.16]]}
+].map(x=>({...x,zones:x.zones.map(([lon,lat,r])=>({kind:x.hazard,n:at(lon,lat),r}))}));
+const HAZARD={dust:{slow:.45,icon:'🌪',text:'황사 속 · 걸음이 느려져요'},heat:{slow:.55,icon:'🔥',text:'폭염 속 · 걸음이 느려져요'},cold:{slow:1,icon:'❄',text:'한파 속 · 몸이 얼 수 있어요'}};
+const FREEZE=1.5,THAW=2;
+const PALETTE={spring:{ground:'#bdd09c',leaf:'#8fb37c',leaf2:'#a6c28a',bloom:'#f0c6c0',bg:['#eadfc6','#f6efdc']},summer:{ground:'#a7c47e',leaf:'#5f9057',leaf2:'#78a466',bloom:null,bg:['#e9dcc0','#f7ecd6']},autumn:{ground:'#cfbf88',leaf:'#cf8445',leaf2:'#d9a94f',bloom:null,bg:['#ead6bb','#f5e8d4']},winter:{ground:'#e3e9e6',leaf:'#dfe8e6',leaf2:'#f1f5f3',bloom:null,bg:['#dfe4e6','#f2f4f2']}};
+function newGame(){const n=at(-.13,-.025);return {n,north:frame(n).u,facing:0,time:0,moving:false,status:'ready',carrying:0,done:[],target:'farm',locale:'ko',message:'봄 · 황사 경보. 커피농장에서 커피콩을 따 보세요.',messageTime:8,steps:0,round:1,season:0,timeLeft:SEASONS[0].limit,total:0,results:[],frozen:0,thaw:0,hazard:null,lastRound:null};}
+function start(s){if(s.status==='intermission'){nextRound(s);s.status='playing'}else if(s.status==='ready'||s.status==='paused')s.status='playing'}
+function zoneAt(s,n=s.n){return SEASONS[s.season].zones.find(z=>angle(n,z.n)<z.r)||null}
+function endRound(s,reason){s.results.push(s.done.length);s.lastRound={reason,delivered:s.done.length};s.frozen=0;s.moving=false;s.status=s.season===SEASONS.length-1?'over':'intermission'}
+function nextRound(s){const n=at(-.13,-.025);Object.assign(s,{season:s.season+1,round:s.season+2,n,north:frame(n).u,done:[],carrying:0,target:'farm',timeLeft:SEASONS[s.season+1].limit,frozen:0,thaw:0,hazard:null});const x=SEASONS[s.season];announce(s,x.name+' · '+x.label+'. '+x.tip+'.')}
+function pause(s){if(s.status==='playing')s.status='paused';else if(s.status==='paused')s.status='playing'}
+function target(s){return LOCS.find(x=>x.id===s.target)||FARM}
+function nearest(s){const a=[FARM,...ORDERS].map(site=>({site,d:angle(s.n,site.door)})).sort((a,b)=>a.d-b.d)[0];return a.d<(a.site.reach||.205)?a.site:null}
+function announce(s,m){s.message=m;s.messageTime=5}
+function interact(s){
+ if(s.status!=='playing')return false;
+ if(s.frozen>0){announce(s,'몸이 꽁꽁 얼었어요. 잠시 기다려 주세요.');return false}
+ const site=nearest(s),left=ORDERS.filter(x=>!s.done.includes(x.id));
+ if(!site){announce(s,'안내 화살표를 따라 가까이 다가가세요.');return false}
+ if(site.id==='farm'){
+  if(s.carrying>=left.length){s.target=left[0].id;announce(s,'커피는 충분해요. 이웃에게 전해 주세요.');return false}
+  s.carrying++;
+  if(s.carrying>=left.length){s.target=left[0].id;announce(s,'커피콩을 땄어요 · 커피 '+s.carrying+'잔 충전 완료! 배달을 시작해요.')}
+  else announce(s,'커피콩을 땄어요 · 커피 '+s.carrying+' / '+left.length+'잔');
+  return true;
+ }
+ if(s.done.includes(site.id)){announce(s,'이미 배달했어요. 다음 이웃을 찾아보세요.');return false}
+ if(!s.carrying){s.target='farm';announce(s,'먼저 커피농장에서 커피콩을 따 주세요.');return false}
+ s.carrying--;s.done.push(site.id);s.total++;announce(s,site.neighbor+' · “고마워요! 좋은 하루 보내요.”');
+ const rest=ORDERS.filter(x=>!s.done.includes(x.id));
+ if(!rest.length)endRound(s,'clear');
+ else s.target=s.carrying?rest[0].id:'farm';
+ return true;
+}
+function step(s,dt,input={}){
+ if(s.status!=='playing')return;dt=clamp(dt,0,.05);s.time+=dt;s.messageTime=Math.max(0,s.messageTime-dt);
+ s.timeLeft=Math.max(0,s.timeLeft-dt);if(s.timeLeft<=0){announce(s,'시간이 다 됐어요.');endRound(s,'timeout');return}
+ const zone=zoneAt(s),kind=zone?zone.kind:null;
+ if(kind!==s.hazard){s.hazard=kind;if(kind&&kind!=='cold')announce(s,HAZARD[kind].text)}
+ s.thaw=Math.max(0,s.thaw-dt);
+ if(s.frozen>0){s.frozen=Math.max(0,s.frozen-dt);s.moving=false;return}
+ if(kind==='cold'&&s.thaw<=0){s.frozen=FREEZE;s.thaw=FREEZE+THAW;s.moving=false;announce(s,'한파! 몸이 꽁꽁 얼었어요.');return}
+ let x=input.x||0,y=input.y||0;const l=Math.hypot(x,y);if(l>1){x/=l;y/=l}s.moving=!!(x||y);
+ if(!s.moving)return;
+ const speed=kind?HAZARD[kind].slow:1;
+ const east=norm(cross(s.north,s.n)),v=add(mul(east,x),mul(s.north,-y)),next=norm(add(s.n,mul(v,dt*.37*speed)));
+ if(!SITES.some(b=>angle(next,b.n)<Math.max(b.w,b.d)/(2*R)+.033)){
+  s.n=next;s.north=norm(sub(s.north,mul(next,dot(s.north,next))));s.facing=Math.atan2(x,-y);s.steps+=dt*3*speed;
+ }
+}
+function chooseTarget(s,id){if(id==='farm'||ORDERS.some(o=>o.id===id&&!s.done.includes(id)))s.target=id}
+// Geometry in true three-dimensional world coordinates. Canvas is the raster target.
+const LIGHT=norm([-1,2,3]);
+function shade(hex,k){const a=hex.slice(1).match(/../g).map(x=>parseInt(x,16));return '#'+a.map(v=>Math.round(clamp(v*k,0,255)).toString(16).padStart(2,'0')).join('')}
+let sceneCache={};
+function makeScene(locale,season='spring'){
+ const korean=locale==='ko',pal=PALETTE[season],polys=[],labels=[];let currentLayer=0;
+ const poly=(pts,color,lit=true)=>{let k=1;if(lit){const n=norm(cross(sub(pts[1],pts[0]),sub(pts[2],pts[0])));k=.77+.23*Math.abs(dot(n,LIGHT))}polys.push({pts,color:shade(color,k),layer:currentLayer})};
+ function local(n,fn){const f=frame(n);return fn((x,y,z)=>add(mul(n,R+y),add(mul(f.e,x),mul(f.u,z))))}
+ function box(p,x,y,z,w,h,d,color){const q=[p(x-w/2,y,z-d/2),p(x+w/2,y,z-d/2),p(x+w/2,y+h,z-d/2),p(x-w/2,y+h,z-d/2),p(x-w/2,y,z+d/2),p(x+w/2,y,z+d/2),p(x+w/2,y+h,z+d/2),p(x-w/2,y+h,z+d/2)];[[0,1,2,3],[1,5,6,2],[4,7,6,5],[0,3,7,4],[3,2,6,7]].forEach(ids=>poly(ids.map(i=>q[i]),color))}
+ function ball(center,r,color,sx=1,sy=1,sz=1,seg=8,rings=5){for(let j=0;j<rings;j++)for(let i=0;i<seg;i++){let v=[];for(const [a,b]of[[i,j],[i+1,j],[i+1,j+1],[i,j+1]]){const n=at(a/seg*TAU,-Math.PI/2+b/rings*Math.PI);v.push(add(center,[n[0]*r*sx,n[1]*r*sy,n[2]*r*sz]))}poly(v,color)}}
+ function roof(p,w,d,y,color,hip=true){const e=.17;const q=[p(-w/2-e,y,-d/2-e),p(w/2+e,y,-d/2-e),p(w/2+e,y,d/2+e),p(-w/2-e,y,d/2+e)];const ridge=[p(-w*.22,y+.42,0),p(w*.22,y+.42,0)];poly([q[0],q[1],ridge[1],ridge[0]],color);poly([q[3],ridge[0],ridge[1],q[2]],color);poly([q[0],ridge[0],q[3]],color);poly([q[1],q[2],ridge[1]],color);box(p,0,y-.07,0,w+.33,.075,d+.33,shade(color,.78));if(hip){for(let i=0;i<12;i++){const x=-w*.56+i*w*1.12/11;const endx=clamp(x,-w*.22,w*.22);poly([p(x-.017,y+.009,-d/2-e),p(x+.017,y+.009,-d/2-e),p(endx+.014,y+.429,0),p(endx-.014,y+.429,0)],shade(color,1.25),false)}box(p,0,y+.4,0,w*.52,.075,.09,shade(color,1.2))}}
+ // The triangulated globe provides both the curved horizon and foreground occlusion.
+ const rng=seed=>{let v=seed;return()=>{v=(Math.imul(v,1664525)+1013904223)>>>0;return v/4294967296}},rand=rng(531);
+ for(let j=0;j<24;j++)for(let i=0;i<48;i++){const a=i/48*TAU,b=-Math.PI/2+j/24*Math.PI;const v=[at(a,b),at(a+TAU/48,b),at(a+TAU/48,b+Math.PI/24),at(a,b+Math.PI/24)].map(n=>mul(n,R));const color=shade(pal.ground,.98+rand()*.035);poly([v[0],v[1],v[2]],color);poly([v[0],v[2],v[3]],color)}
+ currentLayer=1;
+ function road(a,b,width=.13,color='#e9d7b2'){const count=Math.ceil(angle(a,b)*45);for(let i=0;i<count;i++){const n1=norm(add(mul(a,1-i/count),mul(b,i/count))),n2=norm(add(mul(a,1-(i+1)/count),mul(b,(i+1)/count))),side=norm(cross(n1,n2));poly([add(mul(n1,R+.025),mul(side,-width)),add(mul(n1,R+.025),mul(side,width)),add(mul(n2,R+.025),mul(side,width)),add(mul(n2,R+.025),mul(side,-width))],color,false)}}
+ const routes=[[CAFE.door,ORDERS[0].door],[CAFE.door,at(-.65,.05),at(-1.12,.35),at(-1.15,.58),ORDERS[1].door],[ORDERS[1].door,ORDERS[2].door],[ORDERS[2].door,at(1.3,.35),at(1.35,0),at(1.4,-.35),ORDERS[3].door]];for(const route of routes)for(let i=1;i<route.length;i++)road(route[i-1],route[i],.16);
+ road(CAFE.door,at(-.13,-.025),.2);road(SITES.find(x=>x.id==='home4').door,CAFE.door,.14);road(SITES.find(x=>x.id==='home5').door,ORDERS[0].door,.14);road(SITES.find(x=>x.id==='home2').door,SITES.find(x=>x.id==='home3').door,.14);
+ // A narrow stream wraps the lower part of the world.
+ for(let i=0;i<80;i++){const a=i/80*TAU,b=(i+1)/80*TAU;road(at(a,-.72+Math.sin(a*3)*.1),at(b,-.72+Math.sin(b*3)*.1),.18,season==='winter'?'#cfe3ea':'#87b7b1')}
+ currentLayer=2;
+ for(const s of SITES)local(s.n,p=>{
+  box(p,0,.01,0,s.w+.22,.11,s.d+.18,'#a59f83');
+  if(s.type==='pavilion'){
+   box(p,0,.12,0,s.w,.12,s.d,'#aa7754');for(const x of[-.52,.52])for(const z of[-.4,.4])box(p,x,.18,z,.085,s.h,.085,'#79543e');roof(p,s.w,s.d,1.02,korean?s.roof:'#ca9c7e',korean);
+   box(p,0,.25,.27,1.08,.13,.25,'#9c694b');
+  }else{
+   box(p,0,.12,0,s.w,s.h,s.d,s.color);
+   if(korean||s.type==='cafe')roof(p,s.w,s.d,s.h+.15,korean?s.roof:'#b6836e',korean);else box(p,0,s.h+.1,0,s.w+.18,.22,s.d+.12,s.roof);
+   const front=-s.d/2-.014;
+   box(p,0,.13,front,.27,s.h*.76,.02,'#816548');box(p,0,.26,front-.015,.2,s.h*.40,.015,'#bfd1bd');
+   for(const x of[-s.w*.31,s.w*.31]){box(p,x,.38,front,.28,.30,.02,'#6f8e85');box(p,x,.37,front-.02,.30,.035,.025,'#836c51');box(p,x,.38,front-.022,.035,.31,.025,'#836c51')}
+   for(const x of[-s.w*.48,s.w*.48])box(p,x,.12,front,.06,s.h,.04,'#997450');
+   box(p,0,.085,-s.d*.65,.55,.10,.3,'#beb398');
+   if(s.type==='shop'){box(p,0,s.h*.78,-s.d*.66,s.w*.9,.045,.46,s.id==='store'?'#749480':'#b1babe');for(let x=-.45;x<.5;x+=.15)box(p,x,s.h*.71,-s.d*.91,.08,.13,.018,'#f5ead1')}
+   if(s.type==='cafe'){box(p,-.87,.1,-.31,.19,.4,.19,'#bb8264');box(p,-.87,.51,-.31,.25,.07,.25,'#f0dab1');ball(p(-.86,.75,-.31),.17,'#e6b888');}
+  }
+  labels.push({pos:p(0,s.h+.38,-s.d*.50-.05),text:korean?s.name:s.en,kind:'sign',n:s.n});
+  // Earthenware jars and flowers are deliberate localization details.
+  if(korean&&s.type!=='pavilion'){ball(p(s.w*.6,.24,.26),.18,'#8a624c',1,1.25,1);box(p,s.w*.6,.44,.26,.22,.035,.22,'#725442');ball(p(s.w*.69,.16,-.06),.12,'#a77856');}
+ });
+ // Courtyard trees: blossom trees and rounded pines. Fixed seed, reproducible world.
+ for(let i=0;i<53;i++){
+  const lon=(rand()-.5)*TAU,lat=Math.asin((rand()-.5)*1.85),n=at(lon,lat);
+  if(angle(n,at(-.13,-.025))<.3||angle(n,FARM.n)<.45||SITES.some(s=>angle(n,s.n)<.27||angle(n,s.door)<.25))continue;
+  local(n,p=>{box(p,0,.02,0,.065,.47,.065,'#8d7759');const blossom=pal.bloom&&i%3===0;ball(p(0,.70,0),.32,blossom?pal.bloom:pal.leaf,1,1.2,1);ball(p(.17,.56,.07),.24,blossom?shade(pal.bloom,1.03):pal.leaf2);});
+ }
+ // A low garden wall, bench, small tiled gate, lanterns and a laundry line.
+ local(at(-.65,.14),p=>{for(let i=0;i<5;i++){box(p,(i-2)*.20,0,0,.185,.29,.13,'#b7ae94');box(p,(i-2)*.20,.29,0,.21,.06,.16,'#67756b')}});
+ local(at(.48,.75),p=>{box(p,0,.22,0,.54,.08,.23,'#a17a57');box(p,0,.32,.10,.54,.18,.04,'#a17a57');for(const x of[-.2,.2])box(p,x,.02,0,.035,.22,.17,'#735e48')});
+ local(at(.92,.53),p=>{for(const x of[-.4,.4])box(p,x,.02,0,.035,.7,.035,'#837963');box(p,0,.69,0,.85,.018,.018,'#968c73');for(let i=0;i<3;i++)box(p,(i-1)*.23,.4,0,.16,.28,.02,['#ecd1b3','#bbcec0','#ded6c0'][i])});
+ // Coffee farm: rows of shrubs with red cherries in the once-empty meadow.
+ local(FARM.n,p=>{box(p,0,.005,0,1.15,.04,.95,'#9b8058');for(const x of[-.36,0,.36])for(const z of[-.28,.1,.42]){if(!x&&z===.1)continue;box(p,x,.02,z,.05,.2,.05,'#7c6246');ball(p(x,.33,z),.19,'#44723f',1,1.05,1);ball(p(x+.1,.36,z-.11),.045,'#c63d34');ball(p(x-.08,.3,z-.13),.04,'#d9573f');if(season==='winter')ball(p(x,.47,z),.12,'#f4f7f6',1,.45,1)}box(p,0,.02,-.45,.05,.42,.05,'#7c6246');box(p,0,.38,-.46,.46,.16,.03,'#e8d6ab');labels.push({pos:p(0,.8,-.46),text:korean?FARM.name:FARM.en,kind:'sign',n:FARM.n})});
+ // Original town props; no source project artwork is embedded.
+ return {polys,labels,ball,box,local,poly};
+}
+function camera(s){const eye=mul(norm(add(s.n,mul(s.north,.26))),18.9),f=norm(mul(eye,-1)),right=norm(cross(f,s.north)),up=norm(cross(right,f));return {eye,f,right,up,project(v){const d=sub(v,eye),z=dot(d,f);return {x:W/2+dot(d,right)*980/z,y:433-dot(d,up)*980/z,z}},eyeN:norm(eye)}}
+function draw(c,s,{overlay=true}={}){
+ const sea=SEASONS[s.season],key=s.locale+sea.id,scene=sceneCache[key]||(sceneCache[key]=makeScene(s.locale,sea.id));const cam=camera(s);c.save();c.clearRect(0,0,W,H);
+ const bg=c.createLinearGradient(0,0,0,H);bg.addColorStop(0,PALETTE[sea.id].bg[0]);bg.addColorStop(1,PALETTE[sea.id].bg[1]);c.fillStyle=bg;c.fillRect(0,0,W,H);
+ c.fillStyle='#d9cbb344';c.beginPath();c.ellipse(W/2,737,230,25,0,0,TAU);c.fill();
+ let polys=scene.polys.slice(),labels=scene.labels.slice();
+ function dynPoly(pts,color){polys.push({pts,color,layer:2})}
+ // Seasonal hazard zones float just above the ground with a slowly breathing edge.
+ const ZC={dust:['#d8b061','#c99b45'],heat:['#ef7d4f','#f2a24e'],cold:['#a9dcf0','#eef9fd']};
+ for(const z of sea.zones){const f=frame(z.n);for(const [k,h,a] of [[1,.03,'55'],[.62,.035,'4a']]){const pts=[];for(let i=0;i<30;i++){const t=i/30*TAU,r=z.r*k*(1+.06*Math.sin(t*3+s.time*1.4));pts.push(mul(norm(add(mul(z.n,Math.cos(r)),mul(add(mul(f.e,Math.cos(t)),mul(f.u,Math.sin(t))),Math.sin(r)))),R+h))}polys.push({pts,color:ZC[z.kind][k===1?0:1]+a,layer:1.5})}labels.push({pos:mul(z.n,R+.75),text:HAZARD[z.kind].icon,kind:'hazard',n:z.n})}
+ function ball(center,r,color,sx=1,sy=1,sz=1){for(let j=0;j<5;j++)for(let i=0;i<8;i++){const pts=[];for(const[a,b]of[[i,j],[i+1,j],[i+1,j+1],[i,j+1]]){let n=at(a/8*TAU,-Math.PI/2+b/5*Math.PI);pts.push(add(center,[n[0]*r*sx,n[1]*r*sy,n[2]*r*sz]))}const n=norm(cross(sub(pts[1],pts[0]),sub(pts[2],pts[0])));dynPoly(pts,shade(color,.82+.18*Math.abs(dot(n,LIGHT))))}}
+ function person(n,isPlayer,color){const f=isPlayer?{n,e:norm(cross(s.north,n)),u:s.north}:frame(n),bob=isPlayer&&s.moving?Math.sin(s.steps*TAU)*.02:0;
+  const pos=(x,y,z)=>add(mul(n,R+y+bob),add(mul(f.e,x),mul(f.u,z)));
+  ball(pos(0,.24,0),.17,color,1,1.5,.8);ball(pos(0,.53,0),.19,'#d7a576',1,1.07,.95);
+  ball(pos(0,.68,.015),.145,'#675044',1,.55,1);
+  // Faces look toward the southern walking direction; visible from the follow camera.
+  ball(pos(-.061,.555,-.169),.025,'#3a4035');ball(pos(.061,.555,-.169),.025,'#3a4035');
+  ball(pos(-.115,.47,-.14),.031,'#d88872',1,.6,.4);ball(pos(.115,.47,-.14),.031,'#d88872',1,.6,.4);
+  const walk=isPlayer&&s.moving?Math.sin(s.steps*TAU)*.065:0;
+  ball(pos(-.09,.066,walk),.073,'#574e42',.75,.8,1.45);ball(pos(.09,.066,-walk),.073,'#574e42',.75,.8,1.45);
+  ball(pos(-.195,.28,-.07),.067,'#d7a576',.7,1,1);ball(pos(.195,.28,-.07),.067,'#d7a576',.7,1,1);
+  if(isPlayer&&s.carrying){
+   dynPoly([pos(-.20,.29,-.13),pos(.20,.29,-.13),pos(.20,.29,-.46),pos(-.20,.29,-.46)],'#966f4e');
+   for(let i=0;i<s.carrying;i++){const x=(i%2-.5)*.16,z=-.23-Math.floor(i/2)*.16;const base=pos(x,.3,z),top=pos(x,.435,z);for(let a=0;a<8;a++){const k=a/8*TAU,k2=(a+1)/8*TAU;dynPoly([add(base,add(mul(f.e,Math.cos(k)*.048),mul(f.u,Math.sin(k)*.048))),add(base,add(mul(f.e,Math.cos(k2)*.048),mul(f.u,Math.sin(k2)*.048))),add(top,add(mul(f.e,Math.cos(k2)*.058),mul(f.u,Math.sin(k2)*.058))),add(top,add(mul(f.e,Math.cos(k)*.058),mul(f.u,Math.sin(k)*.058)))],a%2?'#f0e7d1':'#e0d2b2')};ball(pos(x,.446,z),.058,'#805a40',1,.17,1)}
+  }
+ }
+ for(const o of ORDERS){person(o.door,false,s.done.includes(o.id)?'#829b75':['#af7869','#8d9675','#a29dab','#b89868'][ORDERS.indexOf(o)]);if(!s.done.includes(o.id))labels.push({pos:mul(o.door,R+1.03),text:'·',kind:'pin',n:o.door,id:o.id});}
+ person(s.n,true,s.frozen>0?'#9fd0e2':'#467f76');
+ labels.push({pos:mul(FARM.n,R+.95),text:'콩',kind:'pin',n:FARM.n,id:'farm'});
+ const faces=[];for(const p of polys){const center=mul(p.pts.reduce(add,[0,0,0]),1/p.pts.length);if(dot(norm(center),cam.eyeN)<(p.layer===0?-.05:.29))continue;const pts=p.pts.map(cam.project);if(pts.some(p=>p.z<=.1))continue;faces.push({pts,color:p.color,layer:p.layer,z:pts.reduce((a,p)=>a+p.z,0)/pts.length})}faces.sort((a,b)=>a.layer-b.layer||b.z-a.z);
+ for(const p of faces){c.fillStyle=p.color;c.beginPath();p.pts.forEach((v,i)=>i?c.lineTo(v.x,v.y):c.moveTo(v.x,v.y));c.closePath();c.fill();if(p.layer===0){c.strokeStyle=p.color;c.lineWidth=.65;c.stroke()}}
+ // Only front-facing labels remain legible above their own buildings.
+ for(const l of labels){if(dot(l.n,cam.eyeN)<.22)continue;const p=cam.project(l.pos);if(l.kind==='sign'){
+  c.font='500 14px "Workshop", "Noto Sans KR", sans-serif';const width=c.measureText(l.text).width+18;c.fillStyle='#faf2df';c.fillRect(p.x-width/2,p.y-12,width,24);c.fillStyle='#49584a';c.textAlign='center';c.fillText(l.text,p.x,p.y+5);
+ }else if(l.kind==='hazard'){c.font='26px sans-serif';c.textAlign='center';c.fillText(l.text,p.x,p.y+Math.sin(s.time*2+p.x)*3)}else if(l.id===s.target){const bounce=Math.sin(s.time*3)*3;c.fillStyle='#b5704f';c.beginPath();c.moveTo(p.x,p.y+13+bounce);c.lineTo(p.x-8,p.y-1+bounce);c.lineTo(p.x+8,p.y-1+bounce);c.fill();c.beginPath();c.arc(p.x,p.y-14+bounce,15,0,TAU);c.fill();c.fillStyle='#fff7e5';c.font='500 17px sans-serif';c.textAlign='center';c.fillText(l.id==='farm'?'콩':String(ORDERS.findIndex(o=>o.id===l.id)+1),p.x,p.y-8+bounce)}}
+ c.textAlign='left';c.fillStyle='#3c5347';c.font='400 14px "Workshop", "Noto Sans KR", sans-serif';c.fillText('CLIMATE CRISIS DELIVERY',42,44);c.font='500 37px "Workshop", "Noto Sans KR", sans-serif';c.fillText(s.locale==='ko'?'달동네 커피':'Neighborhood Coffee',40,95);c.font='400 15px "Workshop", "Noto Sans KR", sans-serif';c.fillStyle='#687763';c.fillText(sea.name+' · '+sea.label+' — '+sea.tip,43,126);
+ const sec=Math.ceil(s.timeLeft),urgent=s.status==='playing'&&s.timeLeft<10;
+ c.fillStyle='#f8f2e5';c.beginPath();c.roundRect(943,30,217,132,8);c.fill();c.fillStyle='#485a48';c.font='500 18px "Workshop", "Noto Sans KR", sans-serif';c.fillText(sea.name+' · 라운드 '+(s.season+1)+' / '+SEASONS.length,966,60);
+ c.font='500 24px "Workshop", "Noto Sans KR", sans-serif';c.fillStyle=urgent?'#c0452f':'#485a48';c.fillText('⏱ '+Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0'),966,94);
+ c.fillStyle='#485a48';c.font='400 15px "Workshop", "Noto Sans KR", sans-serif';c.fillText('배달 '+s.done.length+' / 4  ·  커피 '+s.carrying+'잔',966,122);c.fillText('누적 성공  '+s.total+'회',966,146);
+ // A compass uses actual spherical tangents, including targets beyond the horizon.
+ if(s.status!=='over'&&s.status!=='intermission'){
+  const dest=target(s),delta=sub(dest.door,mul(s.n,dot(dest.door,s.n))),east=norm(cross(s.north,s.n));const a=Math.atan2(dot(delta,east),dot(delta,s.north));
+  c.save();c.translate(1065,212);c.fillStyle='#f8f2e5';c.beginPath();c.arc(0,0,38,0,TAU);c.fill();c.rotate(a);c.fillStyle='#b66f4f';c.beginPath();c.moveTo(0,-26);c.lineTo(11,12);c.lineTo(0,5);c.lineTo(-11,12);c.closePath();c.fill();c.restore();
+  c.fillStyle='#58664e';c.font='400 14px "Workshop", "Noto Sans KR", sans-serif';c.textAlign='center';c.fillText(s.locale==='ko'?dest.name:dest.en,1065,270);c.fillText(Math.round(angle(s.n,dest.door)*R*10)+' 걸음 거리',1065,293);
+ }
+ if(s.status==='playing'&&(s.frozen>0||s.hazard)){const k=s.frozen>0?'cold':s.hazard;c.fillStyle={dust:'#c9a05a22',heat:'#f0784a1c',cold:'#9fd3ea26'}[k];c.fillRect(0,0,W,H);const t=s.frozen>0?'❄ 꽁꽁 얼었어요 · '+s.frozen.toFixed(1)+'초':HAZARD[k].icon+' '+HAZARD[k].text;c.font='500 17px "Workshop", "Noto Sans KR", sans-serif';c.textAlign='center';const w=c.measureText(t).width+40;c.fillStyle=s.frozen>0?'#3f7f9a':'#8a5a36';c.beginPath();c.roundRect(600-w/2,150,w,40,20);c.fill();c.fillStyle='#fff8e7';c.fillText(t,600,176)}
+ if(sea.id==='winter'){c.fillStyle='#ffffffcc';for(let i=0;i<70;i++){const x=(i*173.3+s.time*(14+i%5*6))%W,y=(i*91.7+s.time*(38+i%4*12))%H;c.beginPath();c.arc(x,y,1.3+i%3*.7,0,TAU);c.fill()}}
+ const near=nearest(s);if(s.status==='playing'&&near){c.textAlign='center';c.fillStyle='#3f6151';c.beginPath();c.roundRect(362,716,476,42,21);c.fill();c.fillStyle='#fff8e7';c.font='400 17px "Workshop", "Noto Sans KR", sans-serif';c.fillText('E / Space  ·  '+(near.id==='farm'?'커피콩 따기':s.done.includes(near.id)?'인사 나누기':'커피 전하기'),600,743)}
+ c.textAlign='center';if(s.messageTime>0&&s.status==='playing'){c.fillStyle='#405a48';c.font='400 15px "Workshop", "Noto Sans KR", sans-serif';c.fillText(s.message,600,783)}
+ if(overlay&&s.status!=='playing'){
+  const next=SEASONS[s.season+1],r=s.lastRound;
+  const lines=s.status==='ready'?['이상기후 커피 배달','봄·여름·가을·겨울, 계절마다 네 이웃에게 커피를 전해요.','커피농장에서 커피콩을 따야 커피가 충전돼요. 제한 시간 안에!','산책 시작']
+   :s.status==='paused'?['잠깐 쉬어 가요','계속하기를 누르면 마을로 돌아갑니다.','남은 시간 '+Math.ceil(s.timeLeft)+'초','계속하기']
+   :s.status==='intermission'?[sea.name+' 배달 '+(r.reason==='clear'?'완료!':'시간 초과'),'이번 계절 '+r.delivered+' / 4  ·  누적 성공 '+s.total+'회','다음은 '+next.name+' · '+next.label+' — '+next.tip,next.name+' 시작하기']
+   :['1년의 배달을 마쳤어요','총 배달 성공 '+s.total+' / '+SEASONS.length*4+'회',SEASONS.map((x,i)=>x.name+' '+s.results[i]).join('  ·  '),'다시 도전하기'];
+  c.fillStyle='#f4ebdbe8';c.beginPath();c.roundRect(258,284,684,254,12);c.fill();c.fillStyle='#405a48';c.font='500 36px "Workshop", "Noto Sans KR", sans-serif';c.fillText(lines[0],600,347);
+  c.font='400 18px "Workshop", "Noto Sans KR", sans-serif';c.fillText(lines[1],600,394);c.fillText(lines[2],600,436);
+  c.fillStyle='#aa6e50';c.font='400 16px "Workshop", "Noto Sans KR", sans-serif';c.fillText('아래 시작 / 계속 버튼 · '+lines[3],600,486);
+ }c.restore();
+}
+function mount(canvas,onUpdate=()=>{}){
+ const c=canvas.getContext('2d');canvas.width=W;canvas.height=H;let s=newGame(),last=0,raf,keys=new Set(),pointer={x:0,y:0},alive=true;
+ const keydown=e=>{if(/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName))return;const k=e.key.toLowerCase();if(['arrowup','arrowdown','arrowleft','arrowright','w','a','s','d','e',' '].includes(k)){e.preventDefault();if((k==='e'||k===' ')&&!e.repeat)interact(s);else keys.add(k)}};
+ const keyup=e=>keys.delete(e.key.toLowerCase());
+ const blur=()=>{keys.clear();pointer={x:0,y:0};if(s.status==='playing'){s.status='paused';onUpdate(s)}};
+ const visibility=()=>{if(document.hidden)blur()};
+ function loop(ms){if(!alive)return;const dt=last?(ms-last)/1000:0;last=ms;step(s,dt,{x:pointer.x+(keys.has('arrowright')||keys.has('d')?1:0)-(keys.has('arrowleft')||keys.has('a')?1:0),y:pointer.y+(keys.has('arrowdown')||keys.has('s')?1:0)-(keys.has('arrowup')||keys.has('w')?1:0)});draw(c,s);onUpdate(s);raf=requestAnimationFrame(loop)}
+ addEventListener('keydown',keydown);addEventListener('keyup',keyup);addEventListener('blur',blur);document.addEventListener('visibilitychange',visibility);raf=requestAnimationFrame(loop);
+ return {get state(){return s},start(){if(s.status==='over'){const l=s.locale;s=newGame();s.locale=l}start(s)},pause(){pause(s)},reset(){const l=s.locale;s=newGame();s.locale=l;keys.clear();pointer={x:0,y:0}},interact(){interact(s)},locale(l){s.locale=l==='ko'?'ko':'en'},target(id){chooseTarget(s,id)},pointer(x,y){pointer={x,y}},destroy(){alive=false;cancelAnimationFrame(raf);removeEventListener('keydown',keydown);removeEventListener('keyup',keyup);removeEventListener('blur',blur);document.removeEventListener('visibilitychange',visibility)}};
+}
+return {W,H,R,SITES,ORDERS,CAFE,FARM,SEASONS,HAZARD,zoneAt,endRound,nextRound,newGame,start,pause,step,interact,nearest,target,chooseTarget,draw,mount,math:{add,sub,mul,dot,cross,len,norm,at,angle,frame},camera};
+});
+
+const game=Daldongne.mount(document.querySelector("canvas"),()=>{});game.locale("en");document.querySelector("#start").onclick=()=>{game.start();document.querySelector("canvas").focus()};document.querySelector("#pause").onclick=()=>game.pause();document.querySelector("#reset").onclick=()=>game.reset();document.querySelector("#action").onclick=()=>game.interact();const held=new Map();function move(){let x=0,y=0;held.forEach(v=>{x+=v[0];y+=v[1]});game.pointer(x,y)}document.querySelectorAll('[data-dir]').forEach(b=>{b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture(e.pointerId);held.set(e.pointerId,b.dataset.dir.split(',').map(Number));move()};const stop=e=>{held.delete(e.pointerId);move()};b.onpointerup=stop;b.onpointercancel=stop;b.onlostpointercapture=stop});addEventListener('blur',()=>{held.clear();move()});</script></body></html>
